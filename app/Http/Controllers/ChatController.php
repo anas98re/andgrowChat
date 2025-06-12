@@ -67,4 +67,21 @@ class ChatController extends Controller
             'messages' => $conversation->messages()->orderBy('created_at')->get(),
         ]);
     }
+
+    public function showBySessionId(string $sessionId): JsonResponse
+    {
+        $conversation = Conversation::where('session_id', $sessionId)->first();
+
+        if (!$conversation) {
+            return response()->json([
+                'conversation_id' => null,
+                'messages' => [],
+            ]);
+        }
+
+        return response()->json([
+            'conversation_id' => $conversation->id,
+            'messages' => $conversation->messages()->orderBy('created_at')->get(),
+        ]);
+    }
 }
