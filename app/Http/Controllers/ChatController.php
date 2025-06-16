@@ -39,13 +39,13 @@ class ChatController extends Controller
             'sender' => 'visitor',
             'body' => $request->input('message'),
         ]);
-
+        info('aaaaa');
         // Broadcast visitor message
         broadcast(new VisitorMessageSent($message))->toOthers();
-
+        info('eeee');
         // Dispatch AI processing job
         AskCustomGpt::dispatch($message);
-
+        info('cccc');
         return response()->json([
             'status' => 'success',
             'message' => 'Message received and AI processing initiated.',

@@ -10,7 +10,7 @@ class Conversation extends Model
 {
     use HasFactory;
 
-    protected $fillable = ['session_id'];
+    protected $fillable = ['session_id','openai_thread_id'];
 
     /**
      * Get the messages for the conversation.

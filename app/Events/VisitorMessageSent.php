@@ -5,7 +5,6 @@ namespace App\Events;
 use App\Models\Message;
 use Illuminate\Broadcasting\Channel;
 use Illuminate\Broadcasting\InteractsWithSockets;
-use Illuminate\Broadcasting\PrivateChannel;
 use Illuminate\Contracts\Broadcasting\ShouldBroadcast;
 use Illuminate\Foundation\Events\Dispatchable;
 use Illuminate\Queue\SerializesModels;
@@ -14,12 +13,20 @@ class VisitorMessageSent implements ShouldBroadcast
 {
     use Dispatchable, InteractsWithSockets, SerializesModels;
 
+    /**
+     * The message instance.
+     *
+     * @var \App\Models\Message
+     */
     public Message $message;
 
+    /**
+     * Create a new event instance.
+     */
     public function __construct(Message $message)
     {
         $this->message = $message;
-        $this->dontBroadcastToCurrentUser(); // Do not broadcast to the client that sent the message (if they are using the same listening channel)
+        $this->dontBroadcastToCurrentUser();
     }
 
     /**
@@ -30,7 +37,7 @@ class VisitorMessageSent implements ShouldBroadcast
     public function broadcastOn(): array
     {
         return [
-            new PrivateChannel('conversation.' . $this->message->conversation_id),
+            new Channel('chat-session.' . $this->message->conversation->session_id),
         ];
     }
 
@@ -39,7 +46,7 @@ class VisitorMessageSent implements ShouldBroadcast
      */
     public function broadcastAs(): string
     {
-        return 'message.sent'; // The name of the event the front end will listen to.
+        return 'message.sent';
     }
 
     /**

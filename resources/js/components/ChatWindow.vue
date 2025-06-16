@@ -19,7 +19,7 @@
                 ]">
                     <p class="text-sm break-words">{{ msg.body }}</p>
                     <span class="block text-xs mt-1" :class="msg.sender === 'visitor' ? 'text-blue-200' : 'text-gray-500'">
-                        {{ new Date(msg.created_at).toLocaleTimeString() }}
+                        {{ new Date(msg.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) }}
                     </span>
                 </div>
             </div>
@@ -39,22 +39,21 @@
 <script setup>
 import { ref, onMounted, onUnmounted, nextTick, watch } from 'vue';
 import axios from 'axios';
-import { v4 as uuidv4 } from 'uuid'; // لتوليد session_id
+import { v4 as uuidv4 } from 'uuid';
 import MessageInput from './MessageInput.vue';
 import TypingIndicator from './TypingIndicator.vue';
 
-const emit = defineEmits(['close']); // تعريف الأحداث التي يمكن أن يصدرها المكون
+const emit = defineEmits(['close']);
 
 const messages = ref([]);
 const conversationId = ref(null);
-const sessionId = ref(localStorage.getItem('chat_session_id') || uuidv4()); // استخدام session_id من localStorage
-const isTyping = ref(false); // مؤشر الكتابة
-const messagesContainer = ref(null); // مرجع لعنصر الـ div الذي يحتوي على الرسائل
+const sessionId = ref(localStorage.getItem('chat_session_id') || uuidv4());
+const isTyping = ref(false);
+const messagesContainer = ref(null);
+const channelName = `chat-session.${sessionId.value}`;
 
-// حفظ session_id في localStorage
 localStorage.setItem('chat_session_id', sessionId.value);
 
-// وظيفة التمرير للأسفل في منطقة الرسائل
 const scrollToBottom = () => {
     nextTick(() => {
         if (messagesContainer.value) {
@@ -63,99 +62,77 @@ const scrollToBottom = () => {
     });
 };
 
-// مراقبة تغييرات الرسائل للتمرير تلقائياً
 watch(messages, scrollToBottom, { deep: true });
 
-// تحميل الرسائل السابقة عند فتح نافذة الدردشة
 onMounted(async () => {
-    // التحقق من وجود محادثة سابقة باستخدام session_id
+    // 1. Listen to the public channel
+    if (window.Echo) {
+        window.Echo.channel(channelName)
+            .listen('.message.sent', (event) => {
+                console.log('🎉 BROADCAST EVENT RECEIVED:', event);
+                
+                if (!messages.value.some(msg => msg.id === event.id)) {
+                    messages.value.push(event);
+                }
+                
+                if (event.sender === 'agent') {
+                    isTyping.value = false;
+                }
+            });
+    }
+
+    // 2. Load the previous conversation
     try {
-        const response = await axios.get(`/api/conversation/by-session/${sessionId.value}`); // سنحتاج لتغيير مسار API هذا
-        if (response.data.conversation_id) {
+        const response = await axios.get(`/api/conversation/by-session/${sessionId.value}`);
+        if (response.data && response.data.conversation_id) {
             conversationId.value = response.data.conversation_id;
             messages.value = response.data.messages;
         }
     } catch (error) {
-        console.error('Error loading previous conversation:', error);
-        // إذا لم توجد محادثة، سنقوم بإنشاء واحدة عند إرسال أول رسالة
+        console.error('No previous conversation found or error loading:', error.response?.data || error.message);
     }
-
-    // الاستماع إلى قناة المحادثة
-    if (window.Echo) {
-        window.Echo.private(`conversation.${conversationId.value || sessionId.value}`) // استخدم sessionId إذا لم يكن هناك conversationId
-            .listen('.message.sent', (e) => {
-                console.log('Received message:', e.message);
-                messages.value.push(e.message);
-                isTyping.value = false; // توقف مؤشر الكتابة عند وصول الرد
-            })
-            .error((error) => {
-                console.error('Echo Error:', error);
-            });
-    } else {
-        console.warn('Laravel Echo is not initialized. Real-time features will not work.');
-    }
-    scrollToBottom();
 });
 
 onUnmounted(() => {
-    // مغادرة قناة المحادثة عند إغلاق نافذة الدردشة
-    if (window.Echo && conversationId.value) {
-        window.Echo.leave(`conversation.${conversationId.value}`);
+    if (window.Echo) {
+        window.Echo.leave(channelName);
     }
 });
 
 const sendMessage = async (messageText) => {
     if (!messageText.trim()) return;
 
-    isTyping.value = true; // إظهار مؤشر الكتابة
-
-    const newMessage = {
-        id: Date.now(), // ID مؤقت للواجهة الأمامية
-        conversation_id: conversationId.value,
+    const visitorMessage = {
+        id: 'temp-' + Date.now(),
         sender: 'visitor',
         body: messageText,
         created_at: new Date().toISOString(),
     };
-    messages.value.push(newMessage);
+    messages.value.push(visitorMessage);
+
+    isTyping.value = true;
     scrollToBottom();
 
     try {
         const response = await axios.post('/api/chat', {
             message: messageText,
             conversation_id: conversationId.value,
-            session_id: sessionId.value, // إرسال session_id مع كل طلب
+            session_id: sessionId.value,
         });
-        if (response.data.conversation_id && !conversationId.value) {
+
+        if (response.data.conversation_id) {
             conversationId.value = response.data.conversation_id;
-            // إعادة تهيئة قناة Echo مع الـ conversation_id الجديد
-            if (window.Echo) {
-                window.Echo.leave(`conversation.${sessionId.value}`); // ترك القناة القديمة (إذا كانت تستخدم sessionId)
-                window.Echo.private(`conversation.${conversationId.value}`)
-                    .listen('.message.sent', (e) => {
-                        console.log('Received message:', e.message);
-                        messages.value.push(e.message);
-                        isTyping.value = false;
-                    })
-                    .error((error) => {
-                        console.error('Echo Error after conversation ID update:', error);
-                    });
-            }
         }
+
     } catch (error) {
         console.error('Error sending message:', error);
-        isTyping.value = false; // إخفاء المؤشر حتى في حالة الخطأ
-        // إضافة رسالة خطأ للمستخدم
+        isTyping.value = false;
         messages.value.push({
-            id: Date.now() + 1,
+            id: 'error-' + Date.now(),
             sender: 'agent',
-            body: "I'm sorry, I couldn't send your message. Please try again.",
+            body: "I'm sorry, an error occurred while sending your message. Please try again.",
             created_at: new Date().toISOString(),
         });
-        scrollToBottom();
     }
 };
 </script>
-
-<style scoped>
-/* يمكنك إضافة بعض Tailwind utilities هنا أو في ملف CSS الرئيسي */
-</style>

@@ -67,28 +67,41 @@ return [
     |
     */
 
+    // 'apps' => [
+
+    //     'provider' => 'config',
+
+    //     'apps' => [
+    //         [
+    //             'key' => env('REVERB_APP_KEY'),
+    //             'secret' => env('REVERB_APP_SECRET'),
+    //             'app_id' => env('REVERB_APP_ID'),
+    //             'options' => [
+    //                 'host' => env('REVERB_HOST'),
+    //                 'port' => env('REVERB_PORT', 443),
+    //                 'scheme' => env('REVERB_SCHEME', 'https'),
+    //                 'useTLS' => env('REVERB_SCHEME', 'https') === 'https',
+    //             ],
+    //             'allowed_origins' => ['*'],
+    //             'ping_interval' => env('REVERB_APP_PING_INTERVAL', 60),
+    //             'activity_timeout' => env('REVERB_APP_ACTIVITY_TIMEOUT', 30),
+    //             'max_message_size' => env('REVERB_APP_MAX_MESSAGE_SIZE', 10_000),
+    //         ],
+    //     ],
+
+    // ],
     'apps' => [
-
-        'provider' => 'config',
-
-        'apps' => [
-            [
-                'key' => env('REVERB_APP_KEY'),
-                'secret' => env('REVERB_APP_SECRET'),
-                'app_id' => env('REVERB_APP_ID'),
-                'options' => [
-                    'host' => env('REVERB_HOST'),
-                    'port' => env('REVERB_PORT', 443),
-                    'scheme' => env('REVERB_SCHEME', 'https'),
-                    'useTLS' => env('REVERB_SCHEME', 'https') === 'https',
-                ],
-                'allowed_origins' => ['*'],
-                'ping_interval' => env('REVERB_APP_PING_INTERVAL', 60),
-                'activity_timeout' => env('REVERB_APP_ACTIVITY_TIMEOUT', 30),
-                'max_message_size' => env('REVERB_APP_MAX_MESSAGE_SIZE', 10_000),
-            ],
-        ],
-
+    [
+        'id' => env('REVERB_APP_ID'),
+        'key' => env('REVERB_APP_KEY'),
+        'secret' => env('REVERB_APP_SECRET'),
+        'name' => env('APP_NAME', 'Laravel'),
+        'host' => null,
+        'path' => null,
+        'allowed_origins' => ['*'], // للسماح بالاتصال من أي مكان في بيئة التطوير
+        'ping_interval' => env('REVERB_PING_INTERVAL', 60),
+        'max_message_size' => env('REVERB_MAX_MESSAGE_SIZE', 10_000),
     ],
+],
 
 ];

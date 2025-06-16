@@ -31,4 +31,8 @@ return [
         'region' => env('AWS_DEFAULT_REGION', 'us-east-1'),
     ],
 
+     'openai' => [
+        'assistant_id' => env('OPENAI_ASSISTANT_ID'),
+    ],
+
 ];

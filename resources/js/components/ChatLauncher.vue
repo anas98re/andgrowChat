@@ -30,7 +30,7 @@
 
 <script setup>
 import { ref } from 'vue';
-import ChatWindow from './ChatWindow.vue'; // استيراد مكون نافذة الدردشة
+import ChatWindow from './ChatWindow.vue'; // Import the chat window component
 
 const isOpen = ref(false);
 
