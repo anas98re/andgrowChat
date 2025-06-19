@@ -11,7 +11,7 @@ use Illuminate\Queue\InteractsWithQueue;
 use Illuminate\Queue\SerializesModels;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log; 
-use Throwable; // Import Throwable to handle all types of errors
+use Throwable;
 
 class AskCustomGpt implements ShouldQueue
 {
@@ -19,22 +19,21 @@ class AskCustomGpt implements ShouldQueue
 
     public Message $message;
 
-    /**
-     * Create a new job instance.
-     */
     public function __construct(Message $message)
     {
         $this->message = $message;
-        // Specify the queue name to ensure that the correct worker handles it.
-         $this->onQueue('chat_ai');
+        $this->onQueue('chat_ai');
     }
 
-    /**
-     * Execute the job.
-     */
     public function handle(): void
     {
         try {
+            Log::info('Starting AskCustomGpt job', [
+                'message_id' => $this->message->id,
+                'broadcast_driver' => config('broadcasting.default'),
+                'pusher_app_id' => config('broadcasting.connections.pusher.app_id')
+            ]);
+
             $conversation = $this->message->conversation;
             if (!$conversation) {
                 Log::error("Conversation not found for message ID: " . $this->message->id);
@@ -45,6 +44,10 @@ class AskCustomGpt implements ShouldQueue
             $assistantId = config('services.openai.assistant_id'); 
 
             if (!$apiKey || !$assistantId) {
+                Log::error('OpenAI Configuration Missing', [
+                    'has_api_key' => !empty($apiKey),
+                    'has_assistant_id' => !empty($assistantId)
+                ]);
                 throw new \Exception('OpenAI API Key or Assistant ID is not configured.');
             }
 
@@ -56,14 +59,14 @@ class AskCustomGpt implements ShouldQueue
 
             $threadId = $conversation->openai_thread_id;
 
-            // 1. Create a new Thread only if it does not already exist
+            // 1. Create thread if needed
             if (!$threadId) {
-                Log::info("No thread ID found for conversation {$conversation->id}. Creating a new one.");
+                Log::info("Creating new thread for conversation {$conversation->id}");
                 $threadResponse = Http::withHeaders($headers)
                     ->post('https://api.openai.com/v1/threads');
 
                 if (!$threadResponse->successful()) {
-                    Log::error('OpenAI thread create failed: ', ['response' => $threadResponse->body()]);
+                    Log::error('OpenAI thread create failed', ['response' => $threadResponse->body()]);
                     throw new \Exception('Failed to create thread. Response: ' . $threadResponse->body());
                 }
 
@@ -75,10 +78,10 @@ class AskCustomGpt implements ShouldQueue
                 }
                 
                 $conversation->update(['openai_thread_id' => $threadId]);
-                Log::info("New thread created and saved: {$threadId}");
+                Log::info("New thread created: {$threadId}");
             }
 
-           // 2. Add the user's message to the thread
+            // 2. Add message to thread
             Log::info("Adding message to thread {$threadId}");
             Http::withHeaders($headers)
                 ->post("https://api.openai.com/v1/threads/{$threadId}/messages", [
@@ -87,20 +90,13 @@ class AskCustomGpt implements ShouldQueue
                 ])
                 ->throw(); 
 
-            // 3- Start the Assistant
-            // Log::info("Starting a run for assistant {$assistantId} on thread {$threadId}");
-            // $runResponse = Http::withHeaders($headers)
-            //     ->post("https://api.openai.com/v1/threads/{$threadId}/runs", [
-            //         'assistant_id' => $assistantId,
-            //     ])
-            //     ->throw();
-            // 3- Start the Assistant
-            Log::info("Starting a run for assistant {$assistantId} on thread {$threadId}");
+            // 3. Start assistant run
+            Log::info("Starting assistant run for thread {$threadId}");
             $runResponse = Http::withHeaders($headers)
                 ->post("https://api.openai.com/v1/threads/{$threadId}/runs", [
                     'assistant_id' => $assistantId,
-                    'instructions' => "Please address the user in Arabic. Prioritize information from the attached files.", // يمكنك إضافة تعليمات إضافية هنا
-                    'tools' => [ // <-- This is the most important part we added. (for file searching)
+                    'instructions' => "Please address the user in Arabic. Prioritize information from the attached files.",
+                    'tools' => [
                         ['type' => 'file_search']
                     ]
                 ])
@@ -108,13 +104,13 @@ class AskCustomGpt implements ShouldQueue
 
             $runId = $runResponse->json('id');
             
-            // 4. Wait until the process is complete (Polling)
-            $maxAttempts = 20; // Increase the number of attempts to 40 seconds
+            // 4. Poll for completion
+            $maxAttempts = 20;
             $attempt = 0;
             $runStatus = null;
 
             do {
-                sleep(2); //Wait two seconds between each attempt.
+                sleep(2);
                 
                 $runStatusResponse = Http::withHeaders($headers)
                     ->get("https://api.openai.com/v1/threads/{$threadId}/runs/{$runId}")
@@ -122,7 +118,7 @@ class AskCustomGpt implements ShouldQueue
 
                 $runStatus = $runStatusResponse->json();
                 $status = $runStatus['status'] ?? 'unknown';
-                Log::info("Run ID {$runId} status: {$status} (Attempt: {$attempt})");
+                Log::info("Run status: {$status} (Attempt: {$attempt})");
                 $attempt++;
 
             } while (
@@ -131,39 +127,50 @@ class AskCustomGpt implements ShouldQueue
             );
 
             if ($status !== 'completed') {
-                Log::error("Run did not complete. Final status: {$status}", ['run' => $runStatus]);
-                throw new \Exception("Assistant run failed or timed out with status: {$status}");
+                Log::error("Run failed with status: {$status}", ['run' => $runStatus]);
+                throw new \Exception("Assistant run failed with status: {$status}");
             }
 
-            // 5. Get Assistant's response
-            Log::info("Run completed. Fetching messages from thread {$threadId}");
+            // 5. Get assistant response
+            Log::info("Fetching assistant response from thread {$threadId}");
             $messagesResponse = Http::withHeaders($headers)
                 ->get("https://api.openai.com/v1/threads/{$threadId}/messages", ['limit' => 10]);
 
             $messages = $messagesResponse->json('data') ?? [];
 
-            // Find the last message from the assistant
             $agentReply = "Sorry, I couldn't find a response from the Assistant.";
             foreach ($messages as $msg) {
                 if ($msg['role'] === 'assistant') {
                     $agentReply = $msg['content'][0]['text']['value'] ?? 'Assistant sent an empty message.';
-                    break; // We found the answer, we're out of the loop
+                    break;
                 }
             }
 
-            // Save and send the Agent message
+            // 6. Save message
             $agentMessage = $conversation->messages()->create([
                 'sender' => 'agent',
                 'body' => $agentReply,
             ]);
 
-            Log::info("Broadcasting agent message for conversation {$conversation->id}");
-            broadcast(new AgentMessageSent($agentMessage))->toOthers();
+            Log::info('Agent message saved', [
+                'message_id' => $agentMessage->id,
+                'conversation_id' => $conversation->id,
+                'session_id' => $conversation->session_id
+            ]);
 
-            // Make sure the connection is closed thread
-            // Http::withHeaders($headers)
-            //     ->delete("https://api.openai.com/v1/threads/{$threadId}")
-            //     ->throw();
+            // 7. CRITICAL: Broadcasting with debug
+            Log::info('About to broadcast AgentMessageSent event', [
+                'message_id' => $agentMessage->id,
+                'session_id' => $conversation->session_id,
+                'channel' => 'chat-session.' . $conversation->session_id,
+                'broadcast_driver' => config('broadcasting.default'),
+                'pusher_configured' => config('broadcasting.connections.pusher.app_id') ? 'yes' : 'no'
+            ]);
+
+            // broadcast(new AgentMessageSent($agentMessage))->toOthers();
+            broadcast(new AgentMessageSent($agentMessage));
+            
+            Log::info('AgentMessageSent event broadcasted successfully');
 
         } catch (Throwable $e) {
             Log::error("OpenAI Chat Job failed: " . $e->getMessage(), [
@@ -172,11 +179,12 @@ class AskCustomGpt implements ShouldQueue
                 'error_trace' => $e->getTraceAsString(),
             ]);
 
-           // Send an error message to the user via broadcast
             $errorMessage = $this->message->conversation->messages()->create([
                 'sender' => 'agent',
                 'body' => "I'm sorry, an error occurred while processing your request. Please try again later.",
             ]);
+            
+            Log::info('Broadcasting error message');
             broadcast(new AgentMessageSent($errorMessage))->toOthers();
         }
     }

@@ -4,7 +4,7 @@
         <meta charset="utf-8">
         <meta name="viewport" content="width=device-width, initial-scale=1">
         <title>Andgrow Chat Widget</title>
-        @vite(['resources/css/app.css', 'resources/js/app.js'])
+        @vite(['resources/js/app.js'])
         {{-- This line tells Laravel to merge and load the Vue.js and CSS files compiled by Vite. --}}
         <style>
 

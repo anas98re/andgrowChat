@@ -38,7 +38,7 @@
 
 <script setup>
 import { ref, onMounted, onUnmounted, nextTick, watch } from 'vue';
-import axios from 'axios';
+// axios تم استيراده بالفعل في bootstrap.js وأصبح متاحاً كـ window.axios
 import { v4 as uuidv4 } from 'uuid';
 import MessageInput from './MessageInput.vue';
 import TypingIndicator from './TypingIndicator.vue';
@@ -65,28 +65,43 @@ const scrollToBottom = () => {
 watch(messages, scrollToBottom, { deep: true });
 
 onMounted(async () => {
-    // 1. Listen to the public channel
-    if (window.Echo) {
+    // 1. Listen to the public channel using the globally available window.Echo
+    if (window.Echo) { // تحقق من وجود window.Echo
+        console.log(`Attempting to listen on channel: ${channelName}`);
         window.Echo.channel(channelName)
             .listen('.message.sent', (event) => {
-                console.log('🎉 BROADCAST EVENT RECEIVED:', event);
-                
+                console.log('🎉🎉🎉 CHAT WINDOW: BROADCAST EVENT RECEIVED VIA PUSHER:', event);
+                console.log('EVENT SENDER IS:', event.sender);
+                console.log('EVENT TYPEOF SENDER IS:', typeof event.sender);
+
+                // Add the message to the list if it's not already there
                 if (!messages.value.some(msg => msg.id === event.id)) {
                     messages.value.push(event);
                 }
                 
-                if (event.sender === 'agent') {
+                // Check if the sender is the agent to stop the typing indicator
+                if (event.sender && typeof event.sender === 'string' && event.sender.trim().toLowerCase() === 'agent') {
+                    console.log('Condition met: event.sender is "agent". Setting isTyping to false.');
                     isTyping.value = false;
+                } else {
+                    console.log('Condition NOT met: event.sender is NOT "agent". Value is:', event.sender, "(Type:", typeof event.sender + ")");
                 }
             });
+        console.log(`Successfully listening on channel: ${channelName}`);
+    } else {
+        console.error("Echo is not defined on window object! Make sure bootstrap.js is loaded and Echo is initialized.");
     }
 
     // 2. Load the previous conversation
     try {
-        const response = await axios.get(`/api/conversation/by-session/${sessionId.value}`);
+        const response = await window.axios.get(`/api/conversation/by-session/${sessionId.value}`);
         if (response.data && response.data.conversation_id) {
             conversationId.value = response.data.conversation_id;
             messages.value = response.data.messages;
+            // Ensure isTyping is false after loading old messages if the last one was from agent
+            if (messages.value.length > 0 && messages.value[messages.value.length - 1].sender === 'agent') {
+                isTyping.value = false;
+            }
         }
     } catch (error) {
         console.error('No previous conversation found or error loading:', error.response?.data || error.message);
@@ -94,8 +109,9 @@ onMounted(async () => {
 });
 
 onUnmounted(() => {
-    if (window.Echo) {
+    if (window.Echo) { // تحقق من وجود window.Echo
         window.Echo.leave(channelName);
+        console.log(`Left channel: ${channelName}`);
     }
 });
 
@@ -103,18 +119,18 @@ const sendMessage = async (messageText) => {
     if (!messageText.trim()) return;
 
     const visitorMessage = {
-        id: 'temp-' + Date.now(),
+        id: 'temp-' + Date.now(), // Temporary ID for display
         sender: 'visitor',
         body: messageText,
         created_at: new Date().toISOString(),
     };
     messages.value.push(visitorMessage);
 
-    isTyping.value = true;
+    isTyping.value = true; // Start typing indicator
     scrollToBottom();
 
     try {
-        const response = await axios.post('/api/chat', {
+        const response = await window.axios.post('/api/chat', {
             message: messageText,
             conversation_id: conversationId.value,
             session_id: sessionId.value,
@@ -123,16 +139,21 @@ const sendMessage = async (messageText) => {
         if (response.data.conversation_id) {
             conversationId.value = response.data.conversation_id;
         }
+        // Do not set isTyping to false here. It should be set to false when the agent's response is received.
 
     } catch (error) {
-        console.error('Error sending message:', error);
+        console.error('Error sending message:', error.response?.data || error.message);
+        // If sending fails, stop typing and show an error message
         isTyping.value = false;
         messages.value.push({
             id: 'error-' + Date.now(),
-            sender: 'agent',
+            sender: 'agent', // Or system
             body: "I'm sorry, an error occurred while sending your message. Please try again.",
             created_at: new Date().toISOString(),
         });
     }
 };
 </script>
+
+
+

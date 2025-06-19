@@ -53,8 +53,9 @@ class AgentMessageSent implements ShouldBroadcast
      *
      * @return array<string, mixed>
      */
-    public function broadcastWith(): array
+   public function broadcastWith(): array
     {
+        \Log::info("Broadcasting AgentMessageSent", ['message_id' => $this->message->id]);
         return [
             'id' => $this->message->id,
             'conversation_id' => $this->message->conversation_id,
@@ -63,4 +64,5 @@ class AgentMessageSent implements ShouldBroadcast
             'created_at' => $this->message->created_at->toDateTimeString(),
         ];
     }
+
 }

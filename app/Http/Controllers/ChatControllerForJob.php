@@ -3,57 +3,55 @@
 namespace App\Http\Controllers;
 
 use App\Events\VisitorMessageSent;
+use App\Jobs\AskCustomGpt;
 use App\Models\Conversation;
 use App\Models\Message;
 use App\Http\Requests\ChatRequest;
-use App\Services\OpenAiChatService; 
 use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Str;
-use Illuminate\Support\Facades\Log;
 
-class ChatController extends Controller
+class ChatControllerForJob extends Controller
 {
     /**
      * Handle incoming chat messages.
-     * This will now process the request synchronously.
      */
-    public function store(ChatRequest $request, OpenAiChatService $chatService): JsonResponse
+    public function store(ChatRequest $request): JsonResponse
     {
-        $validated = $request->validated();
         $conversation = null;
         $conversationId = $request->input('conversation_id');
-        $sessionId = $request->input('session_id', (string) Str::uuid());
+        $sessionId = $request->input('session_id', Str::uuid()); // Generate a UUID if no session_id is provided
 
         if ($conversationId) {
             $conversation = Conversation::find($conversationId);
         }
 
+        // If no conversation found or provided, create a new one
         if (!$conversation) {
-            $conversation = Conversation::firstOrCreate(['session_id' => $sessionId]);
+            $conversation = Conversation::firstOrCreate(
+                ['session_id' => $sessionId],
+                ['session_id' => $sessionId] // Ensure session_id is set for new creation
+            );
+            // If a new conversation was created, you might want to send a welcome message here
         }
 
-        $visitorMessage = $conversation->messages()->create([
+        // Create visitor message
+        $message = $conversation->messages()->create([
             'sender' => 'visitor',
-            'body' => $validated['message'],
+            'body' => $request->input('message'),
         ]);
-        Log::info('ChatController: Visitor message created.', ['id' => $visitorMessage->id]);
-
-        // Broadcast visitor message to other tabs/devices if needed
-        broadcast(new VisitorMessageSent($visitorMessage))->toOthers();
-        Log::info('ChatController: VisitorMessageSent broadcasted.');
-
-        // --- NEW SYNCHRONOUS LOGIC ---
-        // Instead of dispatching a job, we call the service directly.
-        // The API response will now wait for this to complete.
-        $chatService->getResponseAndBroadcast($visitorMessage);
-        // --- END OF NEW LOGIC ---
-
+        info('aaaaa');
+        // Broadcast visitor message
+        broadcast(new VisitorMessageSent($message))->toOthers();
+        info('eeee');
+        // Dispatch AI processing job
+        AskCustomGpt::dispatch($message);
+        info('cccc');
         return response()->json([
             'status' => 'success',
-            'message' => 'Message processed synchronously.', // الرسالة تغيرت لتعكس الطريقة الجديدة
+            'message' => 'Message received and AI processing initiated.',
             'conversation_id' => $conversation->id,
             'session_id' => $conversation->session_id,
-            'sent_message' => $visitorMessage->toArray(),
+            'sent_message' => $message->toArray(),
         ]);
     }
 
@@ -62,6 +60,8 @@ class ChatController extends Controller
      */
     public function show(Conversation $conversation): JsonResponse
     {
+        // Ensure only messages related to the session_id are retrieved in production
+        // For now, we fetch all messages for the given conversation ID.
         return response()->json([
             'conversation_id' => $conversation->id,
             'messages' => $conversation->messages()->orderBy('created_at')->get(),
@@ -85,7 +85,3 @@ class ChatController extends Controller
         ]);
     }
 }
-
-
-
-//   /usr/local/bin/php /home/anaplucolsemi/andgrow-chat/artisan queue:work --queue=chat_ai,default --stop-when-empty >> /home/anaplucolsemi/andgrow-chat/storage/logs/cron.log 2>&1
