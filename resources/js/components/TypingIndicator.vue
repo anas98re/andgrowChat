@@ -1,51 +1,45 @@
 <template>
-    <div class="flex justify-start">
-        <div class="bg-gray-200 text-gray-800 p-3 rounded-lg shadow-md max-w-[75%]">
-            <span class="dot-flashing"></span>
-            <span class="ml-2 text-sm">Andgrow Help Assistant is typing...</span>
+    <div class="flex w-full items-start gap-3 justify-start">
+        <!-- Agent Avatar -->
+        <div class="flex-shrink-0 w-7 h-7 rounded-full bg-gradient-to-r from-cyan-200 to-pink-200 flex items-center justify-center text-black text-xs mt-1">
+            AI
+        </div>
+        
+        <!-- The actual typing dots -->
+        <div class="flex items-center space-x-1 h-7 mt-1">
+            <span class="dot-pulse"></span>
+            <span class="dot-pulse animation-delay-200"></span>
+            <span class="dot-pulse animation-delay-400"></span>
         </div>
     </div>
 </template>
 
 <style scoped>
-/* CSS for the typing animation */
-.dot-flashing {
-    position: relative;
-    width: 10px;
-    height: 10px;
-    border-radius: 5px;
-    background-color: #999;
-    color: #999;
-    animation: dotFlashing 1s infinite alternate;
-    animation-delay: 0s;
-    display: inline-block;
+.dot-pulse {
+    display: block;
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background-color: #a0aec0; /* gray-500 */
+    animation: pulse 1.4s infinite ease-in-out both;
 }
 
-.dot-flashing::before, .dot-flashing::after {
-    content: '';
-    display: inline-block;
-    position: absolute;
-    top: 0;
-    width: 10px;
-    height: 10px;
-    border-radius: 5px;
-    background-color: #999;
-    color: #999;
-    animation: dotFlashing 1s infinite alternate;
+.animation-delay-200 {
+    animation-delay: 0.2s;
 }
 
-.dot-flashing::before {
-    left: -15px;
-    animation-delay: .4s;
+.animation-delay-400 {
+    animation-delay: 0.4s;
 }
 
-.dot-flashing::after {
-    left: 15px;
-    animation-delay: .8s;
-}
-
-@keyframes dotFlashing {
-    0% { background-color: #999; }
-    50%, 100% { background-color: #ccc; }
+@keyframes pulse {
+    0%, 80%, 100% {
+        transform: scale(0);
+        opacity: 0.5;
+    }
+    40% {
+        transform: scale(1.0);
+        opacity: 1;
+    }
 }
 </style>

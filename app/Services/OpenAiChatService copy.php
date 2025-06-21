@@ -7,7 +7,6 @@ use App\Models\Message;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
 use Throwable;
-use League\CommonMark\CommonMarkConverter;
 
 class OpenAiChatService
 {
@@ -47,7 +46,7 @@ class OpenAiChatService
             // 1. Create thread if needed
             if (!$threadId) {
                 $threadResponse = Http::withHeaders($headers)->post('https://api.openai.com/v1/threads');
-                $threadResponse->throw();
+                $threadResponse->throw(); // Will throw an exception on failure
                 $threadId = $threadResponse->json('id');
                 $conversation->update(['openai_thread_id' => $threadId]);
                 Log::info("OpenAiChatService: New thread created: {$threadId}");
@@ -78,7 +77,7 @@ class OpenAiChatService
             $attempt = 0;
             $status = '';
             do {
-                sleep(1); // <<-- I changed it to 1 to reduce the delay.
+                sleep(2); // Wait before checking the status
                 $runStatusResponse = Http::withHeaders($headers)->get("https://api.openai.com/v1/threads/{$threadId}/runs/{$runId}")->throw();
                 $status = $runStatusResponse->json('status');
                 Log::info("OpenAiChatService: Run status is '{$status}' (Attempt: {$attempt})");
@@ -91,35 +90,19 @@ class OpenAiChatService
 
             // 5. Get assistant response
             $messagesResponse = Http::withHeaders($headers)->get("https://api.openai.com/v1/threads/{$threadId}/messages", ['limit' => 10])->throw();
-            $messagesData = $messagesResponse->json('data', []); 
-
-            $agentReplyMarkdown = "Sorry, I couldn't find a response.";
-            foreach ($messagesData as $msg) { 
+            $messages = $messagesResponse->json('data', []);
+            $agentReply = "Sorry, I couldn't find a response.";
+            foreach ($messages as $msg) {
                 if ($msg['role'] === 'assistant') {
-                    $agentReplyMarkdown = $msg['content'][0]['text']['value'] ?? 'Assistant sent an empty message.';
+                    $agentReply = $msg['content'][0]['text']['value'] ?? 'Assistant sent an empty message.';
                     break;
                 }
             }
-            Log::info("OpenAiChatService: Fetched assistant response as Markdown.");
+            Log::info("OpenAiChatService: Fetched assistant response.");
 
-            // 6. Clean up the response and convert to HTML
-            $pattern = '/【.*?】/u';
-            $cleanedMarkdown = preg_replace($pattern, '', $agentReplyMarkdown);
-            $cleanedMarkdown = trim($cleanedMarkdown);
-            
-            $converter = new CommonMarkConverter([
-                'html_input' => 'strip',
-                'allow_unsafe_links' => false,
-            ]);
-
-            $agentReplyHtml = $converter->convert($cleanedMarkdown)->getContent();
-
-            // 7. Save and broadcast the HTML formatted message
-            $agentMessage = $conversation->messages()->create([
-                'sender' => 'agent',
-                'body' => $agentReplyHtml,
-            ]);
-            Log::info('OpenAiChatService: Agent message saved as HTML', ['id' => $agentMessage->id]);
+            // 6. Save and broadcast message
+            $agentMessage = $conversation->messages()->create(['sender' => 'agent', 'body' => $agentReply]);
+            Log::info('OpenAiChatService: Agent message saved', ['id' => $agentMessage->id]);
 
             broadcast(new AgentMessageSent($agentMessage));
             Log::info('OpenAiChatService: AgentMessageSent event broadcasted successfully.');
@@ -129,6 +112,7 @@ class OpenAiChatService
                 'message' => $e->getMessage(),
                 'trace' => $e->getTraceAsString(),
             ]);
+            // Optionally, create and broadcast an error message to the user
             if (isset($visitorMessage)) {
                 $errorMessage = $visitorMessage->conversation->messages()->create([
                     'sender' => 'agent',
