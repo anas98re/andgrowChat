@@ -11,13 +11,6 @@ use League\CommonMark\CommonMarkConverter;
 
 class OpenAiChatService
 {
-    /**
-     * Process a visitor's message, get a response from OpenAI,
-     * save it, and broadcast it in real-time.
-     *
-     * @param Message $visitorMessage The message sent by the visitor.
-     * @return void
-     */
     public function getResponseAndBroadcast(Message $visitorMessage): void
     {
         try {
@@ -62,23 +55,33 @@ class OpenAiChatService
                 ->throw();
             Log::info("OpenAiChatService: Added message to thread {$threadId}");
 
-            // 3. Start assistant run
+            // 3. Start assistant run with corrected instructions
             $runResponse = Http::withHeaders($headers)
                 ->post("https://api.openai.com/v1/threads/{$threadId}/runs", [
                     'assistant_id' => $assistantId,
-                    'instructions' => "Please address the user in Arabic. Prioritize information from the attached files.",
+                    'instructions' => <<<PROMPT
+                    You are a helpful assistant. Respond to the user in Arabic.
+                    Your knowledge base is strictly limited to the information contained in the attached files.
+                    Formulate your answers based exclusively on this information.
+                    **Crucially, you must never mention that you are referencing files, documents, or your knowledge base.** You should present the information as if it is your own direct knowledge.
+                    Do not use phrases such as "According to the document...", "I found in the files...", or "I couldn't find information in your documents...".
+                    If you cannot find an answer in the files, simply state that you do not have the information on that topic.
+                    If the question is similar to what is in the files but you cannot find it, send them a message with the support email (anas@gmail.com) address to contact them.
+                    PROMPT,
                     'tools' => [['type' => 'file_search']]
                 ])
                 ->throw();
             $runId = $runResponse->json('id');
             Log::info("OpenAiChatService: Started assistant run {$runId}");
 
+            // ... (باقي الكود يبقى كما هو بدون تغيير) ...
+            
             // 4. Poll for completion
             $maxAttempts = 20;
             $attempt = 0;
             $status = '';
             do {
-                sleep(1); // <<-- I changed it to 1 to reduce the delay.
+                sleep(1);
                 $runStatusResponse = Http::withHeaders($headers)->get("https://api.openai.com/v1/threads/{$threadId}/runs/{$runId}")->throw();
                 $status = $runStatusResponse->json('status');
                 Log::info("OpenAiChatService: Run status is '{$status}' (Attempt: {$attempt})");

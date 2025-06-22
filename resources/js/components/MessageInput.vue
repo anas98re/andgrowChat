@@ -3,9 +3,7 @@
           class="flex items-center space-x-2 border-gray-200 py-1 px-3">
         
         <!-- Plus Icon Button -->
-        <button type="button" class="p-1 text-gray-400 hover:text-gray-600 flex-shrink-0">
-            <svg class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M12 4.5v15m7.5-7.5h-15" /></svg>
-        </button>
+        
 
         <!-- Text Input Area that grows -->
         <div class="flex-1 relative">
