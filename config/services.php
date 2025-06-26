@@ -35,6 +35,7 @@ return [
         'assistant_id' => env('OPENAI_ASSISTANT_ID'),
         'api_key' => env('OPENAI_API_KEY'),
         'organization' => env('OPENAI_ORGANIZATION'),
+        'vector_store_id' => env('OPENAI_VECTOR_STORE_ID'),
     ],
 
 ];
