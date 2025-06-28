@@ -3,17 +3,26 @@
     <head>
         <meta charset="utf-8">
         <meta name="viewport" content="width=device-width, initial-scale=1">
-        
-        <!-- Add this line -->
-        <meta name="csrf-token" content="{{ csrf_token() }}">
-
         <title>Andgrow Chat Widget</title>
-        
         @vite(['resources/js/app.js'])
         {{-- This line tells Laravel to merge and load the Vue.js and CSS files compiled by Vite. --}}
-        
         <style>
-            /* ... your styles ... */
+
+            /* Some basic styles for the page if needed */
+            body {
+                font-family: sans-serif;
+                margin: 0;
+                padding: 0;
+                background-color: #f0f2f5;
+            }
+            .container {
+                max-width: 1200px;
+                margin: 50px auto;
+                padding: 20px;
+                background-color: #fff;
+                border-radius: 8px;
+                box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            }
         </style>
     </head>
     <body>

@@ -24,7 +24,6 @@
 
         <!-- Messages Area -->
         <div ref="messagesContainer" class="flex-1 p-5 overflow-y-auto space-y-6">
-            <!-- ===== START OF MAJOR CHANGES ===== -->
             <div v-for="msg in messages" :key="msg.id" 
                  :class="['flex w-full', msg.sender === 'visitor' ? 'justify-end' : 'justify-start']">
 
@@ -40,14 +39,14 @@
                         <div :class="[
                             'max-w-md px-4 py-3 rounded-2xl',
                             msg.sender === 'visitor'
-                                ? 'bg-gradient-to-r from-cyan-200 to-pink-200 text-black ' // 
+                                ? 'bg-gradient-to-r from-cyan-200 to-pink-200 text-black '
                                 : 'bg-white text-gray-800 rounded-bl-none'
                         ]">
                             <div class="prose prose-sm max-w-none text-sm break-words prose-p:my-2" v-html="msg.body"></div>
                         </div>
 
                         <!-- Action Icons for Agent -->
-                        <div v-if="msg.sender === 'agent' && msg.body" class="mt-2 flex items-center space-x-3 text-gray-400">
+                        <div v-if="msg.sender === 'agent' && msg.body && !msg.id.toString().startsWith('temp-')" class="mt-2 flex items-center space-x-3 text-gray-400">
                             <button @click="copyToClipboard(msg.id, msg.body)" class="hover:text-gray-600 transition-colors duration-200" title="Copy">
                                 <span v-if="copiedMessageId === msg.id" class="text-xs text-green-500">Copied!</span>
                                 <svg v-else class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" /></svg>
@@ -56,19 +55,17 @@
                     </div>
                 </div>
             </div>
-            <!-- ===== END OF MAJOR CHANGES ===== -->
             <TypingIndicator v-if="isTyping" />
         </div>
 
         <!-- Message Input -->
         <div class="p-4 border-t border-gray-200 bg-white rounded-b-2xl">
-            <MessageInput @send-message="sendMessage" :disabled="isTyping" />
+            <MessageInput @send-message="handleSendMessage" :disabled="isStreaming" />
         </div>
     </div>
 </template>
 
 <script setup>
-
 import { ref, watch, nextTick, onMounted, onUnmounted } from 'vue';
 import MessageInput from './MessageInput.vue';
 import TypingIndicator from './TypingIndicator.vue';
@@ -76,14 +73,16 @@ import { v4 as uuidv4 } from 'uuid';
 
 const emit = defineEmits(['close']);
 
-const isMaximized = ref(false);
-const copiedMessageId = ref(null);
 const messages = ref([]);
 const conversationId = ref(null);
 const sessionId = ref(localStorage.getItem('chat_session_id') || uuidv4());
-const isTyping = ref(false);
+const isTyping = ref(false); 
+const isStreaming = ref(false);
 const messagesContainer = ref(null);
 const channelName = `chat-session.${sessionId.value}`;
+const isMaximized = ref(false);
+const copiedMessageId = ref(null);
+let statusInterval = null; // Used to cycle through status messages
 
 localStorage.setItem('chat_session_id', sessionId.value);
 
@@ -100,7 +99,143 @@ const copyToClipboard = (messageId, htmlContent) => {
     }).catch(err => { console.error('Failed to copy text: ', err); });
 };
 
-const sendMessage = async (messageText) => { if (!messageText.trim()) return; const visitorMessage = { id: 'temp-' + Date.now(), sender: 'visitor', body: messageText, created_at: new Date().toISOString() }; messages.value.push(visitorMessage); isTyping.value = true; scrollToBottom(); try { const response = await window.axios.post('/api/chat', { message: messageText, conversation_id: conversationId.value, session_id: sessionId.value }); if (response.data.conversation_id) { conversationId.value = response.data.conversation_id; } } catch (error) { console.error('Error sending message:', error.response?.data || error.message); isTyping.value = false; messages.value.push({ id: 'error-' + Date.now(), sender: 'agent', body: "I'm sorry, an error occurred while sending your message.", created_at: new Date().toISOString() }); } };
+const handleSendMessage = async (messageText) => {
+    if (!messageText.trim() || isStreaming.value) return;
+
+    clearInterval(statusInterval);
+    isStreaming.value = true;
+    const visitorMessage = {
+        id: 'temp-visitor-' + Date.now(),
+        sender: 'visitor',
+        body: `<p>${messageText.replace(/\n/g, '<br>')}</p>`,
+        created_at: new Date().toISOString()
+    };
+    messages.value.push(visitorMessage);
+    isTyping.value = true;
+    scrollToBottom();
+
+    // const statusMessages = [
+    //     "أقوم بالبحث في قاعدة المعرفة الآن...",
+    //     "أحلل المعلومات لأقدم لك أفضل إجابة...",
+    //     "أقوم بتجميع البيانات المطلوبة...",
+    //     "شكراً على انتظارك، أوشكت على الانتهاء..."
+    // ];
+    const statusMessages = [
+        "I'm searching the knowledge base right now...",
+        "I analyze the information to provide you with the best answer...",
+        "I check for the availability of the required data and collect it if found...",
+        "شكراً على انتظارك، أوشكت على الانتهاء..."
+    ];
+    let statusIndex = 0;
+    let agentMessageId = 'temp-agent-' + Date.now();
+
+    setTimeout(() => {
+        if (!isStreaming.value) return;
+        isTyping.value = false;
+        messages.value.push({
+            id: agentMessageId,
+            sender: 'agent',
+            body: `<p class="text-gray-500 italic">${statusMessages[statusIndex]}</p>`,
+            created_at: new Date().toISOString()
+        });
+        scrollToBottom();
+        statusInterval = setInterval(() => {
+            statusIndex = (statusIndex + 1) % statusMessages.length;
+            const msgIndex = messages.value.findIndex(m => m.id === agentMessageId);
+            if (msgIndex !== -1) {
+                messages.value[msgIndex].body = `<p class="text-gray-500 italic">${statusMessages[statusIndex]}</p>`;
+            } else {
+                clearInterval(statusInterval);
+            }
+        }, 3000);
+    }, 1500);
+
+    try {
+        const response = await fetch('/api/chat', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Accept': 'text/event-stream',
+                'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]').getAttribute('content')
+            },
+            body: JSON.stringify({
+                message: messageText,
+                conversation_id: conversationId.value,
+                session_id: sessionId.value,
+            }),
+        });
+
+        clearInterval(statusInterval);
+
+        if (!response.ok || !response.body) {
+            throw new Error(`Server error: ${response.status}`);
+        }
+
+        const reader = response.body.getReader();
+        const decoder = new TextDecoder();
+        let firstChunkReceived = false;
+
+        while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+
+            const chunk = decoder.decode(value, { stream: true });
+            const eventStrings = chunk.split('\n\n').filter(s => s);
+
+            for (const eventString of eventStrings) {
+                if (eventString.trim().startsWith('data:')) {
+                    const dataStr = eventString.trim().substring(5);
+                    try {
+                        const data = JSON.parse(dataStr);
+                        if (data.text) {
+                            isTyping.value = false;
+                            
+                            let msgIndex = messages.value.findIndex(m => m.id === agentMessageId);
+                            
+                            if (msgIndex === -1) {
+                                messages.value.push({ id: agentMessageId, sender: 'agent', body: '', created_at: new Date().toISOString() });
+                                msgIndex = messages.value.length - 1;
+                            }
+                            
+                            const cleanedText = data.text.replace(/【.*?】/gu, '');
+
+                            if (cleanedText) {
+                                if (!firstChunkReceived) {
+                                    messages.value[msgIndex].body = '';
+                                    firstChunkReceived = true;
+                                }
+                                messages.value[msgIndex].body += cleanedText.replace(/\n/g, '<br>');
+                                scrollToBottom();
+                            }
+                        }
+                    } catch(e) {
+                        console.warn('Could not parse JSON chunk', e);
+                    }
+                }
+            }
+        }
+    } catch (error) {
+        clearInterval(statusInterval);
+        console.error('Error streaming response:', error);
+        isTyping.value = false;
+        
+        let msgIndex = messages.value.findIndex(m => m.id === agentMessageId);
+        if (msgIndex !== -1) {
+            messages.value[msgIndex].body = "<p class='text-red-500'>An error occurred. Please try again.</p>";
+        } else {
+             messages.value.push({
+                id: 'error-' + Date.now(),
+                sender: 'agent',
+                body: "<p class='text-red-500'>An error occurred. Please try again.</p>",
+                created_at: new Date().toISOString()
+            });
+        }
+    } finally {
+        clearInterval(statusInterval);
+        isTyping.value = false;
+        isStreaming.value = false;
+    }
+};
 
 watch(messages, scrollToBottom, { deep: true });
 
@@ -108,8 +243,17 @@ onMounted(async () => {
     if (window.Echo) {
         window.Echo.channel(channelName)
             .listen('.message.sent', (event) => {
-                if (!messages.value.some(msg => msg.id === event.id)) { messages.value.push(event); }
-                if (event.sender === 'agent') { isTyping.value = false; }
+                if (event.sender === 'agent') {
+                    clearInterval(statusInterval);
+                    const tempMsgIndex = messages.value.findIndex(m => m.sender === 'agent' && m.id.toString().startsWith('temp-'));
+                    if (tempMsgIndex !== -1) {
+                        messages.value[tempMsgIndex].id = event.id;
+                        messages.value[tempMsgIndex].body = event.body;
+                    } else if (!messages.value.some(m => m.id === event.id)) {
+                        messages.value.push(event);
+                    }
+                }
+                scrollToBottom();
             });
     }
     try {
@@ -118,8 +262,11 @@ onMounted(async () => {
             conversationId.value = response.data.conversation_id;
             messages.value = response.data.messages;
         }
-    } catch (error) { console.error('Error loading conversation:', error.response?.data || error.message); }
+    } catch (error) { console.error('Error loading conversation:', error); }
 });
 
-onUnmounted(() => { if (window.Echo) { window.Echo.leave(channelName); } });
+onUnmounted(() => { 
+    clearInterval(statusInterval);
+    if (window.Echo) { window.Echo.leave(channelName); } 
+});
 </script>

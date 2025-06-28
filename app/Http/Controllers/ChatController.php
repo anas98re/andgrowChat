@@ -1,65 +1,69 @@
 <?php
 
+// File: app/Http/Controllers/ChatController.php
+
 namespace App\Http\Controllers;
 
 use App\Events\VisitorMessageSent;
 use App\Models\Conversation;
-use App\Models\Message;
 use App\Http\Requests\ChatRequest;
-use App\Services\OpenAiChatService; 
+use App\Services\OpenAiChatService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Str;
 use Illuminate\Support\Facades\Log;
+use Symfony\Component\HttpFoundation\StreamedResponse;
 
 class ChatController extends Controller
 {
-    /**
-     * Handle incoming chat messages.
-     * This will now process the request synchronously.
-     */
-    public function store(ChatRequest $request, OpenAiChatService $chatService): JsonResponse
+    public function store(ChatRequest $request, OpenAiChatService $chatService): StreamedResponse
     {
         $validated = $request->validated();
-        $conversation = null;
-        $conversationId = $request->input('conversation_id');
-        $sessionId = $request->input('session_id', (string) Str::uuid());
-
-        if ($conversationId) {
-            $conversation = Conversation::find($conversationId);
-        }
-
-        if (!$conversation) {
-            $conversation = Conversation::firstOrCreate(['session_id' => $sessionId]);
-        }
+        $conversation = Conversation::firstOrCreate(
+            ['session_id' => $request->input('session_id', (string) Str::uuid())]
+        );
 
         $visitorMessage = $conversation->messages()->create([
             'sender' => 'visitor',
             'body' => $validated['message'],
         ]);
-        Log::info('ChatController: Visitor message created.', ['id' => $visitorMessage->id]);
 
-        // Broadcast visitor message to other tabs/devices if needed
         broadcast(new VisitorMessageSent($visitorMessage))->toOthers();
-        Log::info('ChatController: VisitorMessageSent broadcasted.');
 
-        // --- NEW SYNCHRONOUS LOGIC ---
-        // Instead of dispatching a job, we call the service directly.
-        // The API response will now wait for this to complete.
-        $chatService->getResponseAndBroadcast($visitorMessage);
-        // --- END OF NEW LOGIC ---
+        return new StreamedResponse(function () use ($chatService, $visitorMessage) {
+            // --- SIMPLIFIED CALLBACK ---
+            // Now we only expect text chunks from the service.
+            $streamCallback = function (array $chunk) {
+                if ($chunk['type'] === 'text') {
+                    echo "data: " . json_encode(['text' => $chunk['data']]) . "\n\n";
+                    if (ob_get_level() > 0) ob_flush();
+                    flush();
+                }
+            };
+            
+            try {
+                $chatService->streamResponse($visitorMessage, $streamCallback);
+                // Signal the end of the stream
+                echo "event: end\n";
+                echo "data: Stream finished\n\n";
+                
+            } catch (\Throwable $e) {
+                // Signal an error
+                Log::error('Streaming Error in Controller', ['message' => $e->getMessage()]);
+                echo "event: error\n";
+                echo "data: " . json_encode(['error' => 'An error occurred.']) . "\n\n";
+            } finally {
+                if (ob_get_level() > 0) ob_flush();
+                flush();
+            }
 
-        return response()->json([
-            'status' => 'success',
-            'message' => 'Message processed synchronously.', // الرسالة تغيرت لتعكس الطريقة الجديدة
-            'conversation_id' => $conversation->id,
-            'session_id' => $conversation->session_id,
-            'sent_message' => $visitorMessage->toArray(),
+        }, 200, [
+            'Content-Type' => 'text/event-stream',
+            'X-Accel-Buffering' => 'no',
+            'Cache-Control' => 'no-cache',
+            'Connection' => 'keep-alive',
         ]);
     }
 
-    /**
-     * Get conversation messages.
-     */
     public function show(Conversation $conversation): JsonResponse
     {
         return response()->json([
@@ -72,6 +76,7 @@ class ChatController extends Controller
     {
         $conversation = Conversation::where('session_id', $sessionId)->first();
 
+        // Safely handle cases where the conversation doesn't exist
         if (!$conversation) {
             return response()->json([
                 'conversation_id' => null,
@@ -85,7 +90,3 @@ class ChatController extends Controller
         ]);
     }
 }
-
-
-
-//   /usr/local/bin/php /home/anaplucolsemi/andgrow-chat/artisan queue:work --queue=chat_ai,default --stop-when-empty >> /home/anaplucolsemi/andgrow-chat/storage/logs/cron.log 2>&1
