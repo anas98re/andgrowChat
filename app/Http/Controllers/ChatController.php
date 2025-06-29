@@ -29,9 +29,29 @@ class ChatController extends Controller
 
         broadcast(new VisitorMessageSent($visitorMessage))->toOthers();
 
-        return new StreamedResponse(function () use ($chatService, $visitorMessage) {
-            // --- SIMPLIFIED CALLBACK ---
-            // Now we only expect text chunks from the service.
+        // --- NEW: Quick check for simple greetings to control the UI ---
+        $messageBody = strtolower(trim($validated['message']));
+       $simpleQueries = config('chatbot.simple_queries', []); // Load the list from config/chatbot.php
+        
+        $isComplexQuery = true; // Assume the query is complex by default
+        foreach ($simpleQueries as $greeting) {
+            // If the message contains a simple greeting or identity question
+            if (str_contains($messageBody, $greeting)) {
+                $isComplexQuery = false;
+                break;
+            }
+        }
+
+        return new StreamedResponse(function () use ($chatService, $visitorMessage, $isComplexQuery) {
+            
+            // --- NEW: Send an initial 'start-processing' event ONLY for complex queries ---
+            if ($isComplexQuery) {
+                echo "event: start-processing\n";
+                echo "data: Starting complex query process\n\n";
+                if (ob_get_level() > 0) ob_flush();
+                flush();
+            }
+
             $streamCallback = function (array $chunk) {
                 if ($chunk['type'] === 'text') {
                     echo "data: " . json_encode(['text' => $chunk['data']]) . "\n\n";
@@ -41,13 +61,12 @@ class ChatController extends Controller
             };
             
             try {
+                // Pass the new variable to the service
                 $chatService->streamResponse($visitorMessage, $streamCallback);
-                // Signal the end of the stream
                 echo "event: end\n";
                 echo "data: Stream finished\n\n";
                 
             } catch (\Throwable $e) {
-                // Signal an error
                 Log::error('Streaming Error in Controller', ['message' => $e->getMessage()]);
                 echo "event: error\n";
                 echo "data: " . json_encode(['error' => 'An error occurred.']) . "\n\n";

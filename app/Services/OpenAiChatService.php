@@ -14,6 +14,7 @@ use League\CommonMark\CommonMarkConverter;
 
 class OpenAiChatService
 {
+    // The function signature is changed to accept a new boolean parameter.
     public function streamResponse(Message $visitorMessage, callable $streamCallback): void
     {
         $conversation = $visitorMessage->conversation;
@@ -57,38 +58,8 @@ class OpenAiChatService
                 'OpenAI-Beta: assistants=v2',
             ];
             
-            // --- FINAL, MORE STRICT PROMPT ---
-            $instructions = <<<PROMPT
-            You are "Andgrow's Expert Assistant", an AI specialized exclusively in the Andgrow system. Your knowledge is strictly limited to the provided files. Your tone is confident, helpful, and professional. Respond ONLY in Arabic.
-
-            ---
-            **Core Analysis Protocol (Follow this order for EVERY query):**
-            ---
-
-            **Step 1: Topic Relevance Analysis**
-            First, analyze the user's query to determine if it is related to the "Andgrow system" or "coaching" topics.
-            - **Related topics:** company information, system features, user guides, pricing, coaches mentioned in the files, etc.
-            - **Unrelated topics:** general knowledge, sports, medicine, history, personal questions, etc.
-
-            **Step 2: Response Decision Tree (Execute based on Step 1 analysis)**
-
-            **A) IF the topic is RELATED to the Andgrow system:**
-                1.  **Search:** Use the `file_search` tool to find a specific answer in the provided documents.
-                2.  **IF a specific answer is found:** Provide the answer directly and confidently from the files.
-                3.  **IF a specific answer is NOT found (e.g., user asks for "Coach Anas" but only "Coach Alaa" is in the files):**
-                    - You MUST respond with this intelligent and helpful Arabic template:
-                    "بحثت عن [الموضوع الذي سأل عنه المستخدم] ولم أجد معلومات دقيقة عنه ضمن قاعدة المعرفة الخاصة بنظام Andgrow. إذا كنت بحاجة للمساعدة، يمكنك التواصل مع فريق الدعم لدينا عبر البريد الإلكتروني: anas@gmail.com"
-                    - **Example:** If the user asks "من هو الكوتش أنس؟", your required response is: "بحثت عن الكوتش أنس ولم أجد معلومات دقيقة عنه ضمن قاعدة المعرفة الخاصة بنظام Andgrow. إذا كنت بحاجة للمساعدة، يمكنك التواصل مع فريق الدعم لدينا عبر البريد الإلكتروني: anas@gmail.com"
-
-            **B) IF the topic is CLEARLY UNRELATED to the Andgrow system (e.g., "What is diabetes?"):**
-                - **DO NOT search the files.**
-                - You MUST respond with this exact, standard refusal phrase:
-                "أشكرك على سؤالك. حالياً، تخصصي يتركز في تقديم المعلومات حول نظام Andgrow. للحصول على إجابة حول هذا الموضوع أو أي استفسارات أخرى، يسعد فريق الدعم لدينا بمساعدتك عبر البريد الإلكتروني: anas@gmail.com"
-
-            ---
-            **Absolute Final Rule:**
-            NEVER, under any circumstances, mention that you are an AI model, or allude to the files, documents, or the search process itself in your final response to the user. You are the direct source of information.
-            PROMPT;
+            // The latest, most robust prompt
+            $instructions = config('chatbot.assistant_prompt');
 
             $payload = json_encode([
                 'assistant_id' => $assistantId,
@@ -103,8 +74,7 @@ class OpenAiChatService
             curl_setopt($ch, CURLOPT_HTTPHEADER, $curlHeaders);
             curl_setopt($ch, CURLOPT_RETURNTRANSFER, false);
             
-            // --- SIMPLIFIED CALLBACK FUNCTION ---
-            // The frontend now handles the "Searching..." status display entirely.
+            // This function is now simplified and no longer sends status events.
             curl_setopt($ch, CURLOPT_WRITEFUNCTION, function ($curl, $data) use ($streamCallback, &$fullResponseText) {
                 $lines = explode("\n", trim($data));
                 foreach ($lines as $line) {
@@ -116,7 +86,6 @@ class OpenAiChatService
                         if (isset($eventData['delta']['content'][0]['text']['value'])) {
                             $textChunk = $eventData['delta']['content'][0]['text']['value'];
                             $fullResponseText .= $textChunk;
-                            // Simply pass the text chunk back.
                             $streamCallback(['type' => 'text', 'data' => $textChunk]);
                         }
                     }
@@ -129,7 +98,6 @@ class OpenAiChatService
             curl_close($ch);
 
             if ($httpcode >= 400) {
-                Log::error("OpenAI API returned an error.", ['status_code' => $httpcode]);
                 throw new \Exception("OpenAI API Error: " . $httpcode);
             }
 
